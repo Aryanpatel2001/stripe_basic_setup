@@ -11,10 +11,28 @@ export async function POST(req: Request) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+  // Read the selected plan from the request body
+  const body = await req.json();
+  const { plan } = body;
+
   await dbConnect();
   const user = await User.findOne({ email: session.user?.email });
 
   if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
+
+  // Map plan names to Stripe Price IDs from .env
+  const prices: Record<string, string | undefined> = {
+    monthly: process.env.STRIPE_PRICE_MONTHLY,
+    six_month: process.env.STRIPE_PRICE_SIX_MONTH,
+    yearly: process.env.STRIPE_PRICE_YEARLY,
+  };
+
+  // Default to monthly if invalid or missing plan
+  const selectedPriceId = prices[plan] || process.env.STRIPE_PRICE_MONTHLY;
+
+  if (!selectedPriceId) {
+    return NextResponse.json({ error: 'Price ID not configured' }, { status: 500 });
+  }
 
   const checkoutSession = await stripe.checkout.sessions.create({
     customer: user.stripeCustomerId,
@@ -22,7 +40,7 @@ export async function POST(req: Request) {
     payment_method_collection: 'always',
     line_items: [
       {
-        price: process.env.STRIPE_PRICE_ID,
+        price: selectedPriceId,
         quantity: 1,
       },
     ],
